@@ -1,0 +1,228 @@
+---
+- name: Configure environment
+  hosts: all
+  become: true
+  tasks:
+  - name: Install required system packages
+    ansible.builtin.apt:
+      pkg:
+        - python3-pip
+      update_cache: true
+  - name: Install Docker Module for Python
+    pip:
+      name:
+        - 'docker'
+        - 'docker-compose'
+  - name: Copy ssh keys
+    ansible.builtin.copy:
+      src: "{{ terraform_project_dir }}/{{ aws_key_file_name }}"
+      dest: "/root/.ssh/"
+      mode: u+rw,g-rwx,o-rwx
+
+- name: Creates file system
+  hosts: push_mn
+  gather_facts: true
+  tasks:
+    - name: Set remote home folder
+      ansible.builtin.set_fact:
+        project_dir: "{{ ansible_env.HOME }}"
+    - name: Create project folder
+      ansible.builtin.file:
+        path: "{{ project_dir }}"
+        mode: u=rwx,g=rx,o=rx
+        state: directory
+
+    - name: Create folder for certificates
+      ansible.builtin.file:
+        path: "{{ project_dir }}/{{ cert_dir }}"
+        mode: u=rwx,g=rx,o=rx
+        state: directory
+
+    - name: Create docker subfolder
+      ansible.builtin.file:
+        path: "{{ project_dir }}/{{ docker_sub_dir }}"
+        mode: u=rwx,g=rx,o=rx
+        state: directory
+
+    - name: Create folder for auth
+      ansible.builtin.file:
+        path: "{{ project_dir }}/{{ auth_dir }}"
+        mode: u=rwx,g=rx,o=rx
+        state: directory
+
+    - name: Copy folders for creating registry
+      synchronize:
+        src: "{{ item }}"
+        dest: "{{ project_dir }}"
+        recursive: true
+        delete: true
+      loop:
+        - "../registry-certs"
+        - "../registry-proxy"
+
+    - name: Copy compose.yaml
+      ansible.builtin.copy:
+        src: ../compose.yaml
+        dest: "{{ project_dir }}/compose.yaml"
+        mode: u=r,g=rx,o=rx
+
+    - name: Copy .env
+      ansible.builtin.copy:
+        src: ../.env
+        dest: "{{ project_dir }}/.env"
+        mode: u=r,g=rx,o=rx
+
+    - name: Copy docker file
+      ansible.builtin.copy:
+        src: ./Dockerfile
+        dest: "{{ project_dir }}/{{ docker_sub_dir }}/Dockerfile"
+        mode: u=r,g=rx,o=rx
+
+    - name: Copy requirements file
+      ansible.builtin.copy:
+        src: ./requirements.txt
+        dest: "{{ project_dir }}/{{ docker_sub_dir }}/requirements.txt"
+        mode: u=r,g=rx,o=rx
+
+    - name: Copy project folders
+      synchronize:
+        src: "../random-team"
+        dest: "{{ project_dir }}/{{ docker_sub_dir }}/"
+        recursive: true
+        delete: true
+
+    - name: Create docker network
+      docker_network:
+        name: ci-cd
+
+    - name: Replace path var
+      ansible.builtin.replace:
+        path: "{{ project_dir }}/.env"
+        regexp: '(PROJ_FOLDER=).*'
+        replace: '\1{{ project_dir }}'
+
+    - name: Run docker compose
+      community.docker.docker_compose:
+        build: true
+        project_src: "{{ project_dir }}"
+        state: present
+      register: output
+
+    - name: Create certificates
+      become: true
+      changed_when: false
+      ansible.builtin.shell: |
+        cd certs
+        echo -e "\n\nWarsa\n\nai\nregistry-proxy\nmy@email.net\n" | sudo openssl req -new -x509 -text -key domain.key -out domain.cert
+        cd -
+        mkdir -p /etc/docker/certs.d/{{ registry_url }}
+        cp -f certs/* /etc/docker/certs.d/{{ registry_url }}/
+      args:
+        chdir: "{{ project_dir }}"
+
+    - name: Create DNS record
+      become: true
+      changed_when: false
+      shell: "echo '{{ ansible_default_ipv4.address }} registry-proxy' >> /etc/hosts"
+
+    - name: Check htpasswd existence
+      stat:
+        path: "{{ project_dir }}/{{ auth_dir }}/htpasswd"
+      register: file_stat
+
+    # - name: Start a container with a command
+    #   docker_container:
+    #     name: htpasswd
+    #     image: registry-proxy
+    #     command: ["--rm", "--entrypoint htpasswd httpd:2", "-Bbn {{ user_name }} {{ pass }} > htpasswd"]
+    #     args:
+    #       chdir: "{{ project_dir }}/{{ auth_dir }}/"
+    - name: Generate htpasswd
+      changed_when: false
+      ansible.builtin.shell: |
+        docker run --rm --entrypoint htpasswd httpd:2 \
+        -Bbn {{ user_name }} {{ pass }} > htpasswd
+      args:
+        chdir: "{{ project_dir }}/{{ auth_dir }}/"
+        executable: /bin/bash
+      when: not file_stat.stat.exists
+
+    - name: Log in into docker
+      community.docker.docker_login:
+        registry_url: "{{ registry_url }}"
+        username: "{{ user_name }}"
+        password: "{{ pass }}"
+
+    - name: Build container image and push to registry
+      community.docker.docker_image:
+        build:
+          path: "{{ project_dir }}/{{ docker_sub_dir }}/"
+          dockerfile: "Dockerfile"
+        name: "{{ registry_url }}/test:latest"
+        repository: "{{ registry_url }}/test:latest"
+        tag: latest
+        push: true
+        source: build
+
+    - name: Copy domain.cert to local host
+      become: true
+      ansible.builtin.fetch:
+        src: /etc/docker/certs.d/{{ registry_url }}/{{ item }}
+        dest: "{{ registry_url }}/"
+        flat: true
+      loop:
+        - domain.cert
+        - domain.crt
+        - domain.key
+
+- name: Pull an image
+  hosts: pull_mn
+  become: true
+  tasks:
+    - name: Create registry certs dir
+      ansible.builtin.file:
+        path: "/etc/docker/certs.d/{{ registry_url }}"
+        state: directory
+        mode: u=rwx,g=rx,o=rx
+    - name: Copy registry certs to the manage node
+      synchronize:
+        src: "./{{ registry_url }}"
+        dest: "/etc/docker/certs.d/"
+        recursive: true
+        delete: true
+    - name: Create DNS record
+      shell: "grep '{{ hostvars['ml-proj-h-1'].ansible_host }} registry-proxy' /etc/hosts || echo '{{ hostvars['ml-proj-h-1'].ansible_host }} registry-proxy' >> /etc/hosts"
+      changed_when: false
+    - name: Log in into docker
+      community.docker.docker_login:
+        registry_url: "{{ registry_url }}"
+        username: "{{ user_name }}"
+        password: "{{ pass }}"
+    - name: Pull image on manage node
+      community.docker.docker_image:
+        name: registry-proxy:443/test:latest
+        source: pull
+        state: present
+
+- name: Run kedro
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: run container
+      changed_when: false
+      environment:
+        WANDB_API: "{{ WANDB_API_KEY }}"
+      shell: docker run -e WANDB_API_KEY=$WANDB_API registry-proxy:443/test:latest
+      register: id
+
+    - name: Get output
+      ansible.builtin.debug:
+        var: id.stdout_lines
+
+    - name: Remove certs dir from local host
+      ansible.builtin.file:
+        path: "./{{ registry_url }}"
+        state: absent
+      delegate_to: localhost
+    # - local_action: file path="./{{ registry_url }}" state=absent

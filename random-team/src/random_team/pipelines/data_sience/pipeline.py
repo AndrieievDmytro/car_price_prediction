@@ -26,7 +26,7 @@ def create_pipeline(**kwargs) -> Pipeline:
                 name="evaluate_model_node"
             )
             ,
-             node(
+            node(
                 func = log_regressor_visualisations,
                 inputs = ["regressor","X_train","y_train" ,"X_test","y_test"],
                 outputs = None,
