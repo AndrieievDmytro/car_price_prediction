@@ -1,12 +1,11 @@
 # Create a VPC
 resource "aws_vpc" "vpc" {
   cidr_block           = var.vpc_cidr
-  # enable_dns_hostnames = true
-  # enable_dns_support   = true
+  enable_dns_hostnames = var.enable_dns_hostnames
+  enable_dns_support   = var.enable_dns_support
   instance_tenancy     = "default"
-
   tags = {
-    Name = "ml_proj_vpc"
+    Name = "${var.project_name}-vpc"
   }
 
   lifecycle {
@@ -21,22 +20,23 @@ resource "aws_vpc" "vpc" {
 # Create a Public Subnet
 resource "aws_subnet" "public_subnet" {
   vpc_id                  = aws_vpc.vpc.id
- /* 
-   cidrsubnet(prefix, newbits, netnum)
-   prefix must be given in CIDR notation, as defined in RFC 4632 section 3.1.
-   newbits is the number of additional bits with which to extend the prefix. For example
-    , if given a prefix ending in /16 and a newbits value of 4, the resulting subnet address will have length /20.
-   netnum is a whole number that can be represented as a binary integer with no more than newbits binary digits
-    , which will be used to populate the additional bits added to the prefix.
+  /* 
+  cidrsubnet(prefix, newbits, netnum)
+    prefix: must be given in CIDR notation, as defined in RFC 4632 section 3.1.
+  newbits: is the number of additional bits with which to extend the prefix. 
+    For example, if given a prefix ending in /16 and a newbits value of 4, the 
+    resulting subnet address will have length /20.
+  netnum: is a whole number that can be represented as a binary integer with no 
+    more than newbits binary digits, which will be used to populate the additional 
+    bits added to the prefix.
   */
   # vpc_cidr = 10.0.0.0/24 
-  cidr_block              = cidrsubnet(var.vpc_cidr, 4, 15)
+  cidr_block              = cidrsubnet(/*prefix*/var.vpc_cidr, /*newbits*/4, /*netnum*/15)
   # default: map_public_ip_on_launch = true 
-  map_public_ip_on_launch = true
-  availability_zone       = data.aws_availability_zones.available.names[0]
-
+  map_public_ip_on_launch = var.map_public_ip_on_launch
+  availability_zone       = data.aws_availability_zones.available.names[var.availability_zone_index]
   tags = {
-    Name = "ml_proj_public_subnet"
+    Name = "${var.project_name}-public-subnet"
   }
 }
 
@@ -49,9 +49,8 @@ resource "aws_route_table_association" "public_assoc" {
 # Create a Internet Gateway
 resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.vpc.id
-
   tags = {
-    Name = "ml_proj_gateway"
+    Name = "${var.project_name}-gateway"
   }
 }
 
@@ -60,7 +59,7 @@ resource "aws_route_table" "public_rt" {
   vpc_id = aws_vpc.vpc.id
 
   tags = {
-    Name = "public_ml_proj_rt"
+    Name = "${var.project_name}-router-table"
   }
 }
 
