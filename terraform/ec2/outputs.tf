@@ -8,16 +8,7 @@
  When using remote state, root module outputs can be accessed by other configurations via a terraform_remote_state data source.
 */
 
-
-
-# output "ec2_public_dns" {
-#   value = aws_instance.node.public_dns
-# }
-
-output "ec2_public_ip" {
-  # for_each = [{"1","2"}]
-  # value = aws_instance."node'${each.key}'".ec2_public_ip
+output "ec2_public_ips" {
   value = { for k, v in aws_instance.node : k => v.public_ip }
-  # value = "Hello"
 }
 

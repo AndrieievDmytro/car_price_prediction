@@ -46,11 +46,12 @@ services:
       CN: $PROXY_NAME
     volumes:
       - type: bind
-        source: certs
+        source: $PROJ_FOLDER/$CERTS_DIR
         target: $CERTS_DIR
     hostname: *registry-certs-service
 
   &service registry-proxy:
+  # registry-proxy:
     image: *service
     build:
       context: registry-proxy
@@ -61,12 +62,14 @@ services:
     container_name: *service
     volumes:
       - type: bind
-        source: certs
+        # source: ~/proj_folder/ASI_RandomTeam/certs
+        source: $PROJ_FOLDER/$CERTS_DIR
         target: $CERTS_DIR
         read_only: true
       - type: bind
-        source: auth
-        target: /auth
+        # source: ~/proj_folder/ASI_RandomTeam/auth
+        source: $PROJ_FOLDER/$AUTH_DIR
+        target: $AUTH_DIR
         read_only: true
     ports:
       - mode: host

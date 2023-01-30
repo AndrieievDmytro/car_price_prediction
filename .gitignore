@@ -1,5 +1,10 @@
 terraform.tfvars
 userdata.tpl
-.terraform 
+.terraform .*
+.terraform*
+.terraform.lock.hcl
 terraform/terraform.tfstate
 terraform/terraform.tfstate.backup
+*.pem
+*.zip
+aws
