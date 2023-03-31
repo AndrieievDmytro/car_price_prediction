@@ -1,3 +1,5 @@
+ML Project with using Kedro (pipelines, docker), Optuna, Weights and Biases. Terraform was used to create infrastructure in AWS cloud. Docker, Ansible were used to build Docker image and push it on local registry. The project was launched in a pre-prepared infrastructure in the AWS cloud.
+
 ASI project sprint1:
 
 google drive: ...
